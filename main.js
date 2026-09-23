@@ -6,6 +6,9 @@ const path = require('path');
 const W = 200;
 const H = 180;
 
+// electron.exe で直接起動しているときは、アプリのフォルダも渡さないと空の Electron が立ち上がってしまう
+const LOGIN_ITEM = app.isPackaged ? {} : { args: [app.getAppPath()] };
+
 let win = null;
 let tray = null;
 let autoWalk = true;
@@ -82,8 +85,8 @@ function buildMenu() {
       label: 'ログイン時に起動',
       type: 'checkbox',
       visible: process.platform !== 'linux',
-      checked: process.platform !== 'linux' && app.getLoginItemSettings().openAtLogin,
-      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+      checked: process.platform !== 'linux' && app.getLoginItemSettings(LOGIN_ITEM).openAtLogin,
+      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked, ...LOGIN_ITEM }),
     },
     { type: 'separator' },
     { label: '終了', click: () => app.quit() },
