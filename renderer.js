@@ -12,7 +12,7 @@ const STRIDE = 4;             // 歩行1コマで進む距離。足のずれ幅(
 const GRAVITY = 1800;
 
 const C = {
-  line: '#5B3218', body: '#F4A259', light: '#FFD08E', shade: '#D9803A',
+  line: '#5B3218', body: '#39bd17', light: '#FFD08E', shade: '#D9803A',
   leg: '#8A5433', eye: '#2A1A10', white: '#FFFFFF', cheek: '#FF8FA0',
   mouth: '#8A2B2B', tongue: '#E86A6A', stem: '#3E7B39', leaf: '#7CCB6E', leafDark: '#5AA84F',
 };
