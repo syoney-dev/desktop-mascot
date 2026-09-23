@@ -1,0 +1,12 @@
+{
+  "name": "desktop-mascot-hakomaru",
+  "version": "1.0.0",
+  "description": "デスクトップを歩き回るマスコット「ハコまる」",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "latest"
+  }
+}
