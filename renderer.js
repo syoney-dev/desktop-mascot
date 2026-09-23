@@ -4,11 +4,10 @@
 //  設定
 // =====================================================
 const W = 200, H = 180;       // ウィンドウサイズ（main.js と合わせる）
-const PX = 4;                 // ドット絵の1ドット = 4px
+const PX = 4;                 // ドット絵の1ドット = 4px（SCALE=1 のとき）
 const BASE_X = W / 2;         // キャラの足元（ウィンドウ内の座標）
 const BASE_Y = H - 8;
-const WALK_SPEED = 48;        // 歩く速さ (px/秒)
-const STRIDE = 4;             // 歩行1コマで進む距離。足のずれ幅(1ドット=4px)と一致させて「足すべり」を防ぐ
+const WALK_SPEED = 48;        // 歩く速さ (px/秒、SIZE=10 のとき)。体の大きさに比例させる
 const GRAVITY = 1800;
 
 const C = {
@@ -50,6 +49,7 @@ const s = {
   look: 0, dragVx: 0, dragVy: 0, zT: 0,
   autoWalk: true,
 };
+let SCALE = 1;     // キャラの倍率 (0.5〜1.0)。大きさはトレイメニューで変更（main.js で保存）
 let wa = { x: 0, y: 0, width: 1920, height: 1080 };
 const dust = [];   // 砂ぼこり（スクリーン座標で保持＝ウィンドウが動いてもその場に残る）
 const zzz = [];    // 寝息（ウィンドウ内座標）
@@ -60,6 +60,8 @@ const sent = { x: NaN, y: NaN };
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// 大きさ 1〜10 → 倍率（10=標準、1=半分）
+const sizeToScale = (size) => 0.5 + (clamp(size, 1, 10) - 1) / 18;
 
 const groundY = () => wa.y + wa.height - H;
 const minX = () => wa.x + 40 - BASE_X;
@@ -126,6 +128,7 @@ function drawMouth(kind, look) {
 function drawCharacter(p) {
   ctx.save();
   ctx.translate(BASE_X, BASE_Y);
+  ctx.scale(SCALE, SCALE);     // 大きさ（足元を基準に拡大縮小）
 
   if (p.shadow) {
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
@@ -230,7 +233,7 @@ function buildPose() {
 function drawDust() {
   for (const d of dust) {
     const a = clamp(d.life / d.max, 0, 1);
-    const size = Math.round(2 + (1 - a) * 3);
+    const size = Math.max(1, Math.round((2 + (1 - a) * 3) * SCALE));
     ctx.fillStyle = `rgba(196,176,146,${(a * 0.8).toFixed(3)})`;
     ctx.fillRect(Math.round(d.x - sent.x), Math.round(d.y - sent.y), size, size);
   }
@@ -241,8 +244,8 @@ function drawZzz() {
   for (const z of zzz) {
     const a = clamp(1 - z.life / 2.4, 0, 1);
     ctx.globalAlpha = a;
-    ctx.font = `bold ${Math.round(10 + z.life * 5)}px sans-serif`;
-    ctx.fillText('z', z.x + z.life * 12, z.y - z.life * 22);
+    ctx.font = `bold ${Math.round((10 + z.life * 5) * SCALE)}px sans-serif`;
+    ctx.fillText('z', z.x + z.life * 12 * SCALE, z.y - z.life * 22 * SCALE);
   }
   ctx.globalAlpha = 1;
 }
@@ -255,7 +258,7 @@ function drawBubble() {
   const tw = ctx.measureText(bubble.text).width;
   const w = Math.ceil(tw + 18), h = 26;
   const bx = Math.round(clamp(BASE_X - w / 2, 3, W - 3 - w));
-  const by = Math.round(BASE_Y - 21 * PX - h - 10);
+  const by = Math.round(BASE_Y - 21 * PX * SCALE - h - 10);
 
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = C.line;
@@ -377,7 +380,7 @@ function onPoke() {
 
 function footstep() {
   // 後ろ足の位置から、進行方向と逆に砂ぼこりを出す
-  const fx = s.x + BASE_X - s.facing * 10;
+  const fx = s.x + BASE_X - s.facing * 10 * SCALE;
   const fy = s.y + BASE_Y - 2;
   for (let i = 0; i < 2; i++) {
     dust.push({ x: fx + rand(-2, 2), y: fy, vx: -s.facing * rand(8, 26), vy: rand(-22, -8), life: 0.45, max: 0.45 });
@@ -388,7 +391,7 @@ function dustBurst(n) {
   const fx = s.x + BASE_X, fy = s.y + BASE_Y - 2;
   for (let i = 0; i < n; i++) {
     const dir = i % 2 ? 1 : -1;
-    dust.push({ x: fx + dir * rand(8, 20), y: fy, vx: dir * rand(30, 70), vy: rand(-30, -8), life: 0.55, max: 0.55 });
+    dust.push({ x: fx + dir * rand(8, 20) * SCALE, y: fy, vx: dir * rand(30, 70), vy: rand(-30, -8), life: 0.55, max: 0.55 });
   }
 }
 
@@ -458,13 +461,14 @@ function update(dt) {
       const diff = s.targetX - s.x;
       const dist = Math.abs(diff);
       // 歩き出しは加速、目的地が近づくと減速
-      const want = s.facing * WALK_SPEED * clamp(dist / 24, 0.35, 1);
+      const want = s.facing * WALK_SPEED * SCALE * clamp(dist / 24, 0.35, 1);
       s.vx += (want - s.vx) * Math.min(1, dt * 8);
 
       const prev = Math.floor(s.walkPhase);
       s.x += s.vx * dt;
       // 移動した距離ぶんだけコマを進める → 速さが変わっても足が地面をすべらない
-      s.walkPhase += Math.abs(s.vx) * dt / STRIDE;
+      // 1コマで進む距離 = 足のずれ幅（1ドット）
+      s.walkPhase += Math.abs(s.vx) * dt / (PX * SCALE);
       const cur = Math.floor(s.walkPhase);
       if (cur !== prev && cur % 2 === 0) footstep();
 
@@ -480,7 +484,7 @@ function update(dt) {
     case 'sleep':
       s.zT -= dt;
       if (s.zT <= 0) {
-        zzz.push({ x: BASE_X + 26, y: BASE_Y - 70, life: 0 });
+        zzz.push({ x: BASE_X + 26 * SCALE, y: BASE_Y - 70 * SCALE, life: 0 });
         s.zT = 1.3;
       }
       break;
@@ -653,6 +657,9 @@ api.onCommand((c) => {
       s.mode = 'fall';
       say('よばれた！', 2);
       break;
+    case 'size':
+      SCALE = sizeToScale(c.value);
+      break;
     case 'displays-changed':
       refreshWorkArea();
       break;
@@ -699,6 +706,7 @@ function frame(now) {
 }
 
 (async () => {
+  SCALE = sizeToScale(await api.getSize());
   const b = await api.getBounds();
   s.x = b.x;
   s.y = b.y;

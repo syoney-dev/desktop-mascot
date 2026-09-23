@@ -1,6 +1,7 @@
 'use strict';
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 // ウィンドウサイズ（renderer.js の W / H と合わせる）
 const W = 200;
@@ -9,6 +10,22 @@ const H = 180;
 let win = null;
 let tray = null;
 let autoWalk = true;
+
+// ---- 設定の保存（大きさ）----
+const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
+let settings = { size: 10 };   // size: 1〜10（10=標準、1=半分）
+
+function loadSettings() {
+  try {
+    settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsPath(), 'utf8')) };
+  } catch (_) { /* 初回起動・壊れているときは既定値 */ }
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+  } catch (_) { /* 保存できなくても動作は続ける */ }
+}
 
 // 二重起動を防ぐ
 if (!app.requestSingleInstanceLock()) {
@@ -77,6 +94,20 @@ function buildMenu() {
         send({ type: 'summon', x: p.x, workArea: wa });
       },
     },
+    {
+      label: '大きさ',
+      submenu: [10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => ({
+        label: n === 10 ? '10（標準）' : n === 1 ? '1（半分）' : String(n),
+        type: 'radio',
+        checked: settings.size === n,
+        click: () => {
+          settings.size = n;
+          saveSettings();
+          send({ type: 'size', value: n });
+          tray.setContextMenu(buildMenu());
+        },
+      })),
+    },
     { type: 'separator' },
     {
       label: 'ログイン時に起動',
@@ -112,6 +143,8 @@ ipcMain.on('set-ignore', (_e, ignore) => {
 
 ipcMain.handle('get-bounds', () => win.getBounds());
 
+ipcMain.handle('get-size', () => settings.size);
+
 ipcMain.handle('get-work-area', (_e, point) => {
   return screen.getDisplayNearestPoint(point).workArea;
 });
@@ -123,6 +156,7 @@ ipcMain.on('context-menu', () => {
 // ---- アプリのライフサイクル ----
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
+  loadSettings();
   createWindow();
   createTray();
 
