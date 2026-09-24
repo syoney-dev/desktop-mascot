@@ -11,9 +11,12 @@ let win = null;
 let tray = null;
 let autoWalk = true;
 
-// ---- 設定の保存（大きさ）----
+// ---- 設定の保存（大きさ・育成状態）----
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
-let settings = { size: 10 };   // size: 1〜10（10=標準、1=半分）
+// size: 1〜10（10=標準、1=半分）
+// pet: 育成状態（中身は renderer.js が管理。main は保存とメニュー表示だけ）
+// sound: 鳴き声を出すか
+let settings = { size: 10, pet: {}, sound: true };
 
 function loadSettings() {
   try {
@@ -30,6 +33,12 @@ function saveSettings() {
 // 二重起動を防ぐ
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+}
+
+// メニューに出す育成状態
+function petLabel() {
+  const p = settings.pet || {};
+  return `水やり ${p.waterDays || 0}日目 ・ 咲いた回数 ${p.bloomCount || 0}`;
 }
 
 function send(cmd) {
@@ -74,6 +83,20 @@ function createWindow() {
 
 function buildMenu() {
   return Menu.buildFromTemplate([
+    { label: petLabel(), enabled: false },
+    { label: '水をあげる', click: () => send({ type: 'water' }) },
+    { type: 'separator' },
+    {
+      label: '鳴き声',
+      type: 'checkbox',
+      checked: settings.sound,
+      click: (item) => {
+        settings.sound = item.checked;
+        saveSettings();
+        send({ type: 'sound', value: settings.sound });
+        tray.setContextMenu(buildMenu());
+      },
+    },
     {
       label: 'ぶらぶら歩く',
       type: 'checkbox',
@@ -144,6 +167,18 @@ ipcMain.on('set-ignore', (_e, ignore) => {
 ipcMain.handle('get-bounds', () => win.getBounds());
 
 ipcMain.handle('get-size', () => settings.size);
+
+ipcMain.handle('get-sound', () => settings.sound);
+
+ipcMain.handle('get-pet', () => settings.pet);
+
+ipcMain.on('save-pet', (_e, pet) => {
+  const before = petLabel();
+  settings.pet = pet;
+  saveSettings();
+  // 表示が変わったときだけ作り直す（開いているメニューを閉じないように）
+  if (tray && petLabel() !== before) tray.setContextMenu(buildMenu());
+});
 
 ipcMain.handle('get-work-area', (_e, point) => {
   return screen.getDisplayNearestPoint(point).workArea;

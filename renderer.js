@@ -14,7 +14,17 @@ const C = {
   line: '#5B3218', body: '#F4A259', light: '#FFD08E', shade: '#D9803A',
   leg: '#8A5433', eye: '#2A1A10', white: '#FFFFFF', cheek: '#FF8FA0',
   mouth: '#8A2B2B', tongue: '#E86A6A', stem: '#3E7B39', leaf: '#7CCB6E', leafDark: '#5AA84F',
+  flowerCenter: '#FFD84A', water: '#6EC6FF',
 };
+// 花の色（咲くたびに次の色になる）
+const FLOWER_COLORS = ['#FF8FB1', '#FFB347', '#B39DFF', '#6EC6FF', '#FF6B6B'];
+
+// 育成：水やりした日数でこの段階に育つ（芽 → 双葉 → つぼみ → 花）
+const GROW_DAYS = [0, 3, 6, 10];
+const SEED_DAYS = 13;         // 花が咲いてからさらに水やりすると種になり、芽に戻る
+const THIRSTY_DAYS = 2;       // この日数水をもらわないと、しおれる（枯れはしない）
+// 段階ごとの頭のてっぺん（ドット）。ふきだし・寝息の位置に使う
+const PLANT_TOP = [21, 24, 28.5, 30.5];
 
 const LINES_POKE = ['なあに？', 'くすぐったい！', 'えへへ', 'きょうもがんばろ', 'ちょっと休憩しよ？', 'ぴょーん！'];
 
@@ -62,6 +72,84 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // 大きさ 1〜10 → 倍率（10=標準、1=半分）
 const sizeToScale = (size) => 0.5 + (clamp(size, 1, 10) - 1) / 18;
+
+// ---- 育成の状態（main.js 経由で settings.json に保存）----
+const pet = {
+  waterDays: 0,       // 水をもらった日数（今の芽になってから）
+  lastWatered: null,  // 最後に水をもらった日 'YYYY-MM-DD'
+  bloomCount: 0,      // 花が咲いて種になった回数
+  lastSeen: null,     // 最後に起動していた時刻 (ms)
+};
+const drops = [];     // 水やりのしずく（ウィンドウ内座標）
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function daysSince(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  const [ty, tm, td] = today().split('-').map(Number);
+  return Math.round((new Date(ty, tm - 1, td) - new Date(y, m - 1, d)) / 86400000);
+}
+const plantStage = () => GROW_DAYS.filter((d) => pet.waterDays >= d).length - 1;
+const thirsty = () => pet.lastWatered !== null && daysSince(pet.lastWatered) >= THIRSTY_DAYS;
+const headTop = () => PLANT_TOP[plantStage()] * PX * SCALE; // 足元から頭のてっぺんまで (px)
+function savePet() {
+  pet.lastSeen = Date.now();
+  api.savePet({ ...pet });
+}
+
+// =====================================================
+//  鳴き声（Web Audio でその場で合成する。音声ファイルは使わない）
+// =====================================================
+let soundOn = true;
+let audio = null;
+
+// 1音節ぶん：音程を「くいっ」と上げて少し戻す、ファミコン風の声
+function syllable(ac, out, t0, base, len) {
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(base * 0.8, t0);
+  osc.frequency.exponentialRampToValueAtTime(base * 1.25, t0 + len * 0.4);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.95, t0 + len);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
+  osc.connect(gain).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + len + 0.02);
+}
+
+// kind: 'happy'（ぴょ・ぷい）/ 'surprised'（高めに1回）
+// 毎回、高さと音節の数を少し変える
+function voice(ac, out, t0, kind) {
+  if (kind === 'surprised') {
+    syllable(ac, out, t0, rand(1100, 1300), 0.16);
+    return;
+  }
+  const n = 1 + Math.floor(Math.random() * 3);
+  const base = rand(650, 900);
+  for (let i = 0; i < n; i++) {
+    const up = i === n - 1 ? 1.15 : 1;   // 最後の音節は少し上げる（語尾が上がる感じ）
+    syllable(ac, out, t0 + i * 0.11, base * up * rand(0.95, 1.05), 0.09);
+  }
+}
+
+function cry(kind = 'happy') {
+  if (!soundOn) return;
+  try {
+    if (!audio) {
+      audio = new AudioContext();
+      // 矩形波のとがりを丸める
+      audio.soft = audio.createBiquadFilter();
+      audio.soft.type = 'lowpass';
+      audio.soft.frequency.value = 2400;
+      audio.soft.connect(audio.destination);
+    }
+    voice(audio, audio.soft, audio.currentTime + 0.01, kind);
+  } catch (_) { /* 音が出せない環境では鳴かないだけ */ }
+}
 
 const groundY = () => wa.y + wa.height - H;
 const minX = () => wa.x + 40 - BASE_X;
@@ -156,13 +244,8 @@ function drawCharacter(p) {
   box(-10, -10 + p.armA, 2.5, 4, C.body);
   box(7.5, -10 + p.armB, 2.5, 4, C.body);
 
-  // 頭の芽
-  const sw = p.leafSway;
-  rect(-0.5, -20, 1, 4.2, C.stem);
-  rect(-3.5 + sw, -20, 3, 1.5, C.leaf);
-  rect(-3.5 + sw, -19, 3, 0.5, C.leafDark);
-  rect(0.5 + sw, -21, 3, 1.5, C.leaf);
-  rect(0.5 + sw, -20, 3, 0.5, C.leafDark);
+  // 頭の植物
+  drawPlant(p.leafSway);
 
   // 体（箱）
   box(-8, -16, 16, 13, C.body);
@@ -178,6 +261,45 @@ function drawCharacter(p) {
 
   ctx.restore();
   ctx.restore();
+}
+
+// 頭の植物。育ち具合で描き分け、のどが渇いているときは葉が下がって色が沈む
+function drawPlant(sw) {
+  const stage = plantStage();
+  const dry = thirsty();
+  const leaf = dry ? C.leafDark : C.leaf;
+  const leafUnder = dry ? C.stem : C.leafDark;
+  const dy = dry ? 0.5 : 0;
+
+  if (stage === 0) { // 芽
+    rect(-0.5, -20, 1, 4.2, C.stem);
+    rect(-3.5 + sw, -20 + dy, 3, 1.5, leaf);
+    rect(-3.5 + sw, -19 + dy, 3, 0.5, leafUnder);
+    rect(0.5 + sw, -21 + dy, 3, 1.5, leaf);
+    rect(0.5 + sw, -20 + dy, 3, 0.5, leafUnder);
+    return;
+  }
+
+  // 双葉以降：茎がのびて葉が大きくなる
+  const top = stage === 1 ? -23 : -26;
+  const ly = stage === 1 ? -23 : -21;
+  rect(-0.5, top, 1, -15.8 - top, C.stem);
+  rect(-4.5 + sw, ly + dy, 4, 2, leaf);
+  rect(-4.5 + sw, ly + 1.5 + dy, 4, 0.5, leafUnder);
+  rect(0.5 + sw, ly - 1 + dy, 4, 2, leaf);
+  rect(0.5 + sw, ly + 0.5 + dy, 4, 0.5, leafUnder);
+  if (stage === 1) return; // 双葉
+
+  const color = FLOWER_COLORS[pet.bloomCount % FLOWER_COLORS.length];
+  const fx = sw / 2;
+  if (stage === 2) { // つぼみ
+    rect(fx - 1, -28 + dy, 2, 2.5, C.leafDark);
+    rect(fx - 0.5, -28.5 + dy, 1, 1, color);
+  } else { // 花
+    rect(fx - 1.5, -30.5 + dy, 3, 5, color);
+    rect(fx - 2.5, -29.5 + dy, 5, 3, color);
+    rect(fx - 1, -29 + dy, 2, 2, C.flowerCenter);
+  }
 }
 
 function buildPose() {
@@ -239,6 +361,12 @@ function drawDust() {
   }
 }
 
+function drawDrops() {
+  ctx.fillStyle = C.water;
+  const w = Math.max(1, Math.round(2 * SCALE)), h = Math.max(2, Math.round(4 * SCALE));
+  for (const d of drops) ctx.fillRect(Math.round(d.x), Math.round(d.y), w, h);
+}
+
 function drawZzz() {
   ctx.fillStyle = C.line;
   for (const z of zzz) {
@@ -258,7 +386,7 @@ function drawBubble() {
   const tw = ctx.measureText(bubble.text).width;
   const w = Math.ceil(tw + 18), h = 26;
   const bx = Math.round(clamp(BASE_X - w / 2, 3, W - 3 - w));
-  const by = Math.round(BASE_Y - 21 * PX * SCALE - h - 10);
+  const by = Math.round(BASE_Y - headTop() - h - 10);
 
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = C.line;
@@ -291,6 +419,7 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   drawDust();
   drawCharacter(buildPose());
+  drawDrops();
   drawZzz();
   drawBubble();
 }
@@ -312,6 +441,7 @@ function nextAction() {
   const night = hour >= 23 || hour < 6;
   const r = Math.random();
   if (r < (night ? 0.25 : 0.04)) return startSleep();
+  if (thirsty() && r > 0.9) say(pick(['のどかわいたな…', 'おみず ほしいな…']), 2.5);
   if (s.autoWalk && r < 0.7) return startWalk();
   if (r < 0.85) return startLook();
   s.mode = 'idle';
@@ -363,6 +493,37 @@ function wakeUp() {
   hop(260);
 }
 
+// 水やり（1日1回ぶんだけ育つ。同じ日にもう一度もらっても喜ぶだけ）
+function water() {
+  if (s.mode === 'sleep') zzz.length = 0;
+  for (let i = 0; i < 6; i++) {
+    drops.push({ x: BASE_X + rand(-18, 18) * SCALE, y: BASE_Y - headTop() - rand(20, 50) * SCALE, vy: rand(0, 60) });
+  }
+  setMood('happy', 1.5);
+  if (onGround()) hop(260);
+
+  if (pet.lastWatered === today()) {
+    say(pick(['もうおなかいっぱい', 'さっきもらったよ〜', 'ありがと！']), 2);
+    return;
+  }
+  const wasDry = thirsty();
+  const before = plantStage();
+  pet.waterDays++;
+  pet.lastWatered = today();
+  say(wasDry ? 'いきかえる〜！' : pick(['ごくごく…おいしい！', 'ありがとう！', 'しみる〜']), 2);
+
+  let grew = null;
+  if (pet.waterDays >= SEED_DAYS) {
+    pet.bloomCount++;
+    pet.waterDays = 0;
+    grew = 'たねができた！またそだててね';
+  } else if (plantStage() !== before) {
+    grew = ['', 'のびた！', 'つぼみができた！', 'はながさいた！'][plantStage()];
+  }
+  savePet();
+  if (grew) setTimeout(() => { say(grew, 3); setMood('happy', 1.5); if (onGround()) hop(); }, 2200);
+}
+
 function hop(power = 380) {
   s.squash = 0.8;
   s.mode = 'fall';
@@ -371,8 +532,9 @@ function hop(power = 380) {
 }
 
 function onPoke() {
-  if (s.mode === 'sleep') return wakeUp();
+  if (s.mode === 'sleep') { cry('surprised'); return wakeUp(); }
   if (!onGround()) return;
+  cry('happy');
   setMood('happy', 1.2);
   say(pick(LINES_POKE));
   hop();
@@ -484,7 +646,7 @@ function update(dt) {
     case 'sleep':
       s.zT -= dt;
       if (s.zT <= 0) {
-        zzz.push({ x: BASE_X + 26 * SCALE, y: BASE_Y - 70 * SCALE, life: 0 });
+        zzz.push({ x: BASE_X + 26 * SCALE, y: BASE_Y - headTop() + 14 * SCALE, life: 0 });
         s.zT = 1.3;
       }
       break;
@@ -519,6 +681,13 @@ function update(dt) {
     d.vy *= Math.pow(0.2, dt);
     d.life -= dt;
     if (d.life <= 0) dust.splice(i, 1);
+  }
+  // 水やりのしずく（頭の高さまで落ちたら消える）
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    d.vy += GRAVITY * 0.5 * dt;
+    d.y += d.vy * dt;
+    if (d.y > BASE_Y - 13 * PX * SCALE) drops.splice(i, 1);
   }
   // 寝息
   for (let i = zzz.length - 1; i >= 0; i--) {
@@ -660,6 +829,12 @@ api.onCommand((c) => {
     case 'size':
       SCALE = sizeToScale(c.value);
       break;
+    case 'sound':
+      soundOn = c.value;
+      break;
+    case 'water':
+      water();
+      break;
     case 'displays-changed':
       refreshWorkArea();
       break;
@@ -667,6 +842,10 @@ api.onCommand((c) => {
 });
 
 function greeting() {
+  // しばらく会っていなかったとき
+  const away = pet.lastSeen ? Date.now() - pet.lastSeen : 0;
+  if (away >= 3 * 86400000) return 'あいたかったよ〜！';
+  if (away >= 86400000) return 'ひさしぶり！';
   const h = new Date().getHours();
   if (h >= 5 && h < 11) return 'おはよう！';
   if (h >= 11 && h < 18) return 'こんにちは！';
@@ -707,6 +886,11 @@ function frame(now) {
 
 (async () => {
   SCALE = sizeToScale(await api.getSize());
+  soundOn = await api.getSound();
+  Object.assign(pet, await api.getPet());
+  const hello = greeting();   // lastSeen を上書きする前に決める
+  savePet();
+  setInterval(savePet, 60000); // 最後に起動していた時刻を残す
   const b = await api.getBounds();
   s.x = b.x;
   s.y = b.y;
@@ -714,7 +898,7 @@ function frame(now) {
   // 画面の上からぴょんと登場
   s.y = groundY() - 260;
   s.mode = 'fall';
-  setTimeout(() => say(greeting(), 2.5), 700);
+  setTimeout(() => say(hello, 2.5), 700);
   setInterval(() => { refreshWorkArea(); hourlyCheck(); }, 5000);
   requestAnimationFrame(frame);
 })();
