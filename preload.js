@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('mascot', {
   getSize: () => ipcRenderer.invoke('get-size'),
   getSound: () => ipcRenderer.invoke('get-sound'),
   getPet: () => ipcRenderer.invoke('get-pet'),
+  getSkin: () => ipcRenderer.invoke('get-skin'),
+  setTrayIcon: (url1x, url2x) => ipcRenderer.send('set-tray-icon', url1x, url2x),
   savePet: (pet) => ipcRenderer.send('save-pet', pet),
   getWorkArea: (point) => ipcRenderer.invoke('get-work-area', point),
   showMenu: () => ipcRenderer.send('context-menu'),

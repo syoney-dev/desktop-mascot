@@ -11,12 +11,20 @@ let win = null;
 let tray = null;
 let autoWalk = true;
 
-// ---- 設定の保存（大きさ・育成状態）----
+// 選べるキャラ（見た目や動きは skins/*.js。ここはメニュー用の名前と、育成があるかだけ）
+const SKINS = [
+  { id: 'hakomaru', name: 'ハコまる', care: true },
+  { id: 'nyanmaru', name: 'にゃんまる', care: false },
+];
+const currentSkin = () => SKINS.find((k) => k.id === settings.skin) || SKINS[0];
+
+// ---- 設定の保存（キャラ・大きさ・鳴き声・育成状態）----
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 // size: 1〜10（10=標準、1=半分）
 // pet: 育成状態（中身は renderer.js が管理。main は保存とメニュー表示だけ）
 // sound: 鳴き声を出すか
-let settings = { size: 10, pet: {}, sound: true };
+// skin: 選んでいるキャラ
+let settings = { size: 10, pet: {}, sound: true, skin: 'hakomaru' };
 
 function loadSettings() {
   try {
@@ -83,9 +91,12 @@ function createWindow() {
 
 function buildMenu() {
   return Menu.buildFromTemplate([
-    { label: petLabel(), enabled: false },
-    { label: '水をあげる', click: () => send({ type: 'water' }) },
-    { type: 'separator' },
+    // 育成はあるキャラだけ
+    ...(currentSkin().care ? [
+      { label: petLabel(), enabled: false },
+      { label: '水をあげる', click: () => send({ type: 'water' }) },
+      { type: 'separator' },
+    ] : []),
     {
       label: '鳴き声',
       type: 'checkbox',
@@ -118,6 +129,21 @@ function buildMenu() {
       },
     },
     {
+      label: 'キャラクター',
+      submenu: SKINS.map((k) => ({
+        label: k.name,
+        type: 'radio',
+        checked: currentSkin().id === k.id,
+        click: () => {
+          settings.skin = k.id;
+          saveSettings();
+          send({ type: 'skin', value: k.id });
+          tray.setToolTip(k.name);
+          tray.setContextMenu(buildMenu());
+        },
+      })),
+    },
+    {
       label: '大きさ',
       submenu: [10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => ({
         label: n === 10 ? '10（標準）' : n === 1 ? '1（半分）' : String(n),
@@ -148,7 +174,7 @@ function createTray() {
   let icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
   if (process.platform === 'darwin') icon = icon.resize({ width: 18, height: 18 });
   tray = new Tray(icon);
-  tray.setToolTip('ハコまる');
+  tray.setToolTip(currentSkin().name);
   tray.setContextMenu(buildMenu());
 }
 
@@ -171,6 +197,18 @@ ipcMain.handle('get-size', () => settings.size);
 ipcMain.handle('get-sound', () => settings.sound);
 
 ipcMain.handle('get-pet', () => settings.pet);
+
+ipcMain.handle('get-skin', () => currentSkin().id);
+
+// トレイのアイコンは renderer がキャラの絵から作って送ってくる（32px と、高解像度用の 64px）
+ipcMain.on('set-tray-icon', (_e, url1x, url2x) => {
+  if (!tray) return;
+  let icon = nativeImage.createEmpty();
+  icon.addRepresentation({ scaleFactor: 1, dataURL: url1x });
+  icon.addRepresentation({ scaleFactor: 2, dataURL: url2x });
+  if (process.platform === 'darwin') icon = icon.resize({ width: 18, height: 18 });
+  tray.setImage(icon);
+});
 
 ipcMain.on('save-pet', (_e, pet) => {
   const before = petLabel();

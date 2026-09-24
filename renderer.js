@@ -10,39 +10,19 @@ const BASE_Y = H - 8;
 const WALK_SPEED = 48;        // 歩く速さ (px/秒、SIZE=10 のとき)。体の大きさに比例させる
 const GRAVITY = 1800;
 
-const C = {
-  line: '#5B3218', body: '#F4A259', light: '#FFD08E', shade: '#D9803A',
-  leg: '#8A5433', eye: '#2A1A10', white: '#FFFFFF', cheek: '#FF8FA0',
-  mouth: '#8A2B2B', tongue: '#E86A6A', stem: '#3E7B39', leaf: '#7CCB6E', leafDark: '#5AA84F',
-  flowerCenter: '#FFD84A', water: '#6EC6FF',
-};
-// 花の色（咲くたびに次の色になる）
-const FLOWER_COLORS = ['#FF8FB1', '#FFB347', '#B39DFF', '#6EC6FF', '#FF6B6B'];
+const WATER_COLOR = '#6EC6FF'; // 水やりのしずく
 
 // 育成：水やりした日数でこの段階に育つ（芽 → 双葉 → つぼみ → 花）
 const GROW_DAYS = [0, 3, 6, 10];
 const SEED_DAYS = 13;         // 花が咲いてからさらに水やりすると種になり、芽に戻る
 const THIRSTY_DAYS = 2;       // この日数水をもらわないと、しおれる（枯れはしない）
-// 段階ごとの頭のてっぺん（ドット）。ふきだし・寝息の位置に使う
-const PLANT_TOP = [21, 24, 28.5, 30.5];
-
-const LINES_POKE = ['なあに？', 'くすぐったい！', 'えへへ', 'きょうもがんばろ', 'ちょっと休憩しよ？', 'ぴょーん！'];
-
-// 歩行サイクル（4コマ）: a=左足, b=右足 → [前後のずれ(ドット), 持ち上げ(ドット)]
-// 0と2が接地、1と3が足の入れ替わりで体が少し浮く
-const WALK = [
-  { a: [ 1, 0], b: [-1, 0], bob:  0, armA:  0.5, armB: -0.5 },
-  { a: [ 0, 0], b: [ 0, 1], bob: -2, armA:  0,   armB:  0   },
-  { a: [-1, 0], b: [ 1, 0], bob:  0, armA: -0.5, armB:  0.5 },
-  { a: [ 0, 1], b: [ 0, 0], bob: -2, armA:  0,   armB:  0   },
-];
 
 // =====================================================
 //  セットアップ
 // =====================================================
 const api = window.mascot;
 const canvas = document.getElementById('stage');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
+let ctx = canvas.getContext('2d', { willReadFrequently: true }); // アイコンを描くときだけ一時的に差し替える
 const dpr = window.devicePixelRatio || 1;
 canvas.width = W * dpr;
 canvas.height = H * dpr;
@@ -73,6 +53,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // 大きさ 1〜10 → 倍率（10=標準、1=半分）
 const sizeToScale = (size) => 0.5 + (clamp(size, 1, 10) - 1) / 18;
 
+// 今のキャラ（skins/*.js）。見た目・ポーズ・セリフ・鳴き声はスキンが持つ
+let skin = SKINS.hakomaru;
+
 // ---- 育成の状態（main.js 経由で settings.json に保存）----
 const pet = {
   waterDays: 0,       // 水をもらった日数（今の芽になってから）
@@ -93,7 +76,7 @@ function daysSince(day) {
 }
 const plantStage = () => GROW_DAYS.filter((d) => pet.waterDays >= d).length - 1;
 const thirsty = () => pet.lastWatered !== null && daysSince(pet.lastWatered) >= THIRSTY_DAYS;
-const headTop = () => PLANT_TOP[plantStage()] * PX * SCALE; // 足元から頭のてっぺんまで (px)
+const headTop = () => skin.headTop() * PX * SCALE; // 足元から頭のてっぺんまで (px)
 function savePet() {
   pet.lastSeen = Date.now();
   api.savePet({ ...pet });
@@ -104,37 +87,6 @@ function savePet() {
 // =====================================================
 let soundOn = true;
 let audio = null;
-
-// 1音節ぶん：音程を「くいっ」と上げて少し戻す、ファミコン風の声
-function syllable(ac, out, t0, base, len) {
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.type = 'square';
-  osc.frequency.setValueAtTime(base * 0.8, t0);
-  osc.frequency.exponentialRampToValueAtTime(base * 1.25, t0 + len * 0.4);
-  osc.frequency.exponentialRampToValueAtTime(base * 0.95, t0 + len);
-  gain.gain.setValueAtTime(0.0001, t0);
-  gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.012);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
-  osc.connect(gain).connect(out);
-  osc.start(t0);
-  osc.stop(t0 + len + 0.02);
-}
-
-// kind: 'happy'（ぴょ・ぷい）/ 'surprised'（高めに1回）
-// 毎回、高さと音節の数を少し変える
-function voice(ac, out, t0, kind) {
-  if (kind === 'surprised') {
-    syllable(ac, out, t0, rand(1100, 1300), 0.16);
-    return;
-  }
-  const n = 1 + Math.floor(Math.random() * 3);
-  const base = rand(650, 900);
-  for (let i = 0; i < n; i++) {
-    const up = i === n - 1 ? 1.15 : 1;   // 最後の音節は少し上げる（語尾が上がる感じ）
-    syllable(ac, out, t0 + i * 0.11, base * up * rand(0.95, 1.05), 0.09);
-  }
-}
 
 function cry(kind = 'happy') {
   if (!soundOn) return;
@@ -147,7 +99,7 @@ function cry(kind = 'happy') {
       audio.soft.frequency.value = 2400;
       audio.soft.connect(audio.destination);
     }
-    voice(audio, audio.soft, audio.currentTime + 0.01, kind);
+    skin.voice(audio, audio.soft, audio.currentTime + 0.01, kind);
   } catch (_) { /* 音が出せない環境では鳴かないだけ */ }
 }
 
@@ -165,52 +117,13 @@ function rect(x, y, w, h, color) {
 }
 // 縁取りつきの箱
 function box(x, y, w, h, fill) {
-  rect(x, y, w, h, C.line);
+  rect(x, y, w, h, skin.C.line);
   rect(x + 0.5, y + 0.5, w - 1, h - 1, fill);
 }
-
-function drawEyes(kind, look) {
-  for (const ex of [-4.5 + look, 2 + look]) {
-    switch (kind) {
-      case 'blink':
-        rect(ex, -9.5, 2.5, 0.8, C.eye);
-        break;
-      case 'happy': // ∩
-        rect(ex, -10, 0.8, 1, C.eye);
-        rect(ex + 0.5, -11, 1.5, 0.8, C.eye);
-        rect(ex + 1.7, -10, 0.8, 1, C.eye);
-        break;
-      case 'sleep':
-        rect(ex, -9.5, 2.5, 0.6, C.eye);
-        rect(ex + 0.5, -9, 1.5, 0.5, C.eye);
-        break;
-      case 'wide':
-        rect(ex - 0.3, -12, 3.1, 3.6, C.eye);
-        rect(ex + 0.3, -11.5, 1.2, 1.2, C.white);
-        break;
-      default:
-        rect(ex, -11.5, 2.5, 3, C.eye);
-        rect(ex + 0.5, -11, 1, 1, C.white);
-    }
-  }
-}
-
-function drawMouth(kind, look) {
-  const mx = look;
-  switch (kind) {
-    case 'open':
-      rect(mx - 1.2, -7.2, 2.4, 1.6, C.mouth);
-      rect(mx - 0.7, -6.2, 1.4, 0.6, C.tongue);
-      break;
-    case 'o':
-      rect(mx - 0.6, -7.3, 1.2, 1.2, C.mouth);
-      break;
-    case 'small':
-      rect(mx - 0.5, -7, 1, 0.6, C.mouth);
-      break;
-    default:
-      rect(mx - 1, -7, 2, 0.7, C.mouth);
-  }
+// 縁取りつきの箱をいくつか重ねて1つの形にする（つなぎ目に線が出ない）
+function blob(parts, fill) {
+  for (const [x, y, w, h] of parts) rect(x, y, w, h, skin.C.line);
+  for (const [x, y, w, h] of parts) rect(x + 0.5, y + 0.5, w - 1, h - 1, fill);
 }
 
 function drawCharacter(p) {
@@ -221,135 +134,59 @@ function drawCharacter(p) {
   if (p.shadow) {
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(0, 1, 26 * (0.8 + 0.2 * (2 - p.squash)), 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 1, skin.shadowW * (0.8 + 0.2 * (2 - s.squash)), 5, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // つぶれ・伸び（体積を保つように横も変える）＋向き反転＋傾き
-  const sy = p.squash;
-  const sx = 1 + (1 - p.squash) * 0.9;
+  const sy = s.squash;
+  const sx = 1 + (1 - s.squash) * 0.9;
   ctx.scale(sx * s.facing, sy);
   ctx.rotate(p.tilt * s.facing);
 
-  // 足（体の後ろに描く）
-  const legs = [[-5, p.legs[0]], [2, p.legs[1]]];
-  for (const [lx, [dx, lift]] of legs) {
-    box(lx + dx, -3.6 - lift, 3, 3.6, C.leg);
-  }
-
-  ctx.save();
-  ctx.translate(0, p.bobPx);
-
-  // 腕
-  box(-10, -10 + p.armA, 2.5, 4, C.body);
-  box(7.5, -10 + p.armB, 2.5, 4, C.body);
-
-  // 頭の植物
-  drawPlant(p.leafSway);
-
-  // 体（箱）
-  box(-8, -16, 16, 13, C.body);
-  rect(-7.5, -15.5, 15, 1.5, C.light);
-  rect(5, -14, 2.5, 10.5, C.shade);
-  rect(-7.5, -4.5, 15, 1, C.shade);
-
-  // 顔
-  drawEyes(p.eyes, p.look);
-  rect(-6.5 + p.look, -8, 2, 1, C.cheek);
-  rect(4.5 + p.look, -8, 2, 1, C.cheek);
-  drawMouth(p.mouth, p.look);
-
+  skin.draw(p);
   ctx.restore();
-  ctx.restore();
-}
-
-// 頭の植物。育ち具合で描き分け、のどが渇いているときは葉が下がって色が沈む
-function drawPlant(sw) {
-  const stage = plantStage();
-  const dry = thirsty();
-  const leaf = dry ? C.leafDark : C.leaf;
-  const leafUnder = dry ? C.stem : C.leafDark;
-  const dy = dry ? 0.5 : 0;
-
-  if (stage === 0) { // 芽
-    rect(-0.5, -20, 1, 4.2, C.stem);
-    rect(-3.5 + sw, -20 + dy, 3, 1.5, leaf);
-    rect(-3.5 + sw, -19 + dy, 3, 0.5, leafUnder);
-    rect(0.5 + sw, -21 + dy, 3, 1.5, leaf);
-    rect(0.5 + sw, -20 + dy, 3, 0.5, leafUnder);
-    return;
-  }
-
-  // 双葉以降：茎がのびて葉が大きくなる
-  const top = stage === 1 ? -23 : -26;
-  const ly = stage === 1 ? -23 : -21;
-  rect(-0.5, top, 1, -15.8 - top, C.stem);
-  rect(-4.5 + sw, ly + dy, 4, 2, leaf);
-  rect(-4.5 + sw, ly + 1.5 + dy, 4, 0.5, leafUnder);
-  rect(0.5 + sw, ly - 1 + dy, 4, 2, leaf);
-  rect(0.5 + sw, ly + 0.5 + dy, 4, 0.5, leafUnder);
-  if (stage === 1) return; // 双葉
-
-  const color = FLOWER_COLORS[pet.bloomCount % FLOWER_COLORS.length];
-  const fx = sw / 2;
-  if (stage === 2) { // つぼみ
-    rect(fx - 1, -28 + dy, 2, 2.5, C.leafDark);
-    rect(fx - 0.5, -28.5 + dy, 1, 1, color);
-  } else { // 花
-    rect(fx - 1.5, -30.5 + dy, 3, 5, color);
-    rect(fx - 2.5, -29.5 + dy, 5, 3, color);
-    rect(fx - 1, -29 + dy, 2, 2, C.flowerCenter);
-  }
 }
 
 function buildPose() {
-  const p = {
-    legs: [[0, 0], [0, 0]], bobPx: 0, armA: 0, armB: 0,
-    eyes: 'open', mouth: 'normal', look: s.look,
-    leafSway: 0, tilt: s.tilt, squash: s.squash, shadow: true,
-  };
+  const p = skin.pose(s, t);
+  applyFace(p);
+  return p;
+}
 
-  switch (s.mode) {
-    case 'walk': {
-      const f = WALK[Math.floor(s.walkPhase) % 4];
-      p.legs = [f.a, f.b];
-      p.bobPx = f.bob;
-      p.armA = f.armA;
-      p.armB = f.armB;
-      p.look = 1;                            // 進行方向を見る
-      p.leafSway = f.bob ? -0.5 : 0;         // 芽が揺れて遅れてついてくる
-      break;
-    }
-    case 'drag': {
-      const w = Math.sin(t * 10);
-      p.legs = [[0, 0.4 + 0.4 * w], [0, 0.4 - 0.4 * w]]; // 足をぷらぷら
-      p.armA = p.armB = -4;                               // バンザイ
-      p.leafSway = clamp(-s.dragVx / 600, -1, 1);
-      p.shadow = false;
-      break;
-    }
-    case 'fall':
-      p.legs = [[0, 0.5], [0, 0.5]];
-      p.armA = p.armB = -3;
-      p.leafSway = s.vy < 0 ? 0 : 0.5;
-      p.shadow = false;
-      break;
-    case 'sleep':
-      p.bobPx = Math.round(Math.sin(t * 1.3) * 1.5); // ゆっくり呼吸
-      p.armA = p.armB = 0.5;
-      p.leafSway = 0.5;
-      break;
-    default:
-      p.bobPx = Math.round(Math.sin(t * 2.2));       // 待機中の呼吸
-      p.leafSway = Math.round(Math.sin(t * 1.5)) / 2;
-  }
-
+// 表情（どのキャラも共通）
+function applyFace(p) {
+  p.eyes = 'open';
+  p.mouth = 'normal';
   if (s.mood === 'happy') { p.eyes = 'happy'; p.mouth = 'open'; }
   else if (s.mood === 'surprised') { p.eyes = 'wide'; p.mouth = 'o'; }
   else if (s.mode === 'sleep') { p.eyes = 'sleep'; p.mouth = 'small'; }
   else if (s.blink > 0) { p.eyes = 'blink'; }
+}
 
-  return p;
+// 今のキャラを size x size のアイコンに描いて dataURL で返す（トレイ・アプリのアイコン用）
+function renderIcon(size) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const saved = ctx;
+  ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const [x0, y0, x1, y1] = skin.iconBox();
+  let dot = size / (Math.max(x1 - x0, y1 - y0) + 1);  // 1ドットの大きさ (px)
+  if (dot >= 6) dot = Math.floor(dot / 2) * 2;       // 大きいアイコンは偶数 px にそろえてくっきり
+  const k = dot / PX;
+  ctx.setTransform(k, 0, 0, k,
+    Math.round(size / 2 - (x0 + x1) / 2 * dot), Math.round(size / 2 - (y0 + y1) / 2 * dot));
+  const p = skin.pose({ mode: 'idle', look: 0, tilt: 0, vx: 0, vy: 0, dragVx: 0, walkPhase: 0 }, 0);
+  p.eyes = 'open';
+  p.mouth = 'normal';
+  skin.draw(p);
+  ctx = saved;
+  return c.toDataURL('image/png');
+}
+
+function updateTrayIcon() {
+  api.setTrayIcon(renderIcon(32), renderIcon(64));
 }
 
 function drawDust() {
@@ -362,13 +199,13 @@ function drawDust() {
 }
 
 function drawDrops() {
-  ctx.fillStyle = C.water;
+  ctx.fillStyle = WATER_COLOR;
   const w = Math.max(1, Math.round(2 * SCALE)), h = Math.max(2, Math.round(4 * SCALE));
   for (const d of drops) ctx.fillRect(Math.round(d.x), Math.round(d.y), w, h);
 }
 
 function drawZzz() {
-  ctx.fillStyle = C.line;
+  ctx.fillStyle = skin.C.line;
   for (const z of zzz) {
     const a = clamp(1 - z.life / 2.4, 0, 1);
     ctx.globalAlpha = a;
@@ -389,7 +226,7 @@ function drawBubble() {
   const by = Math.round(BASE_Y - headTop() - h - 10);
 
   ctx.fillStyle = '#FFFFFF';
-  ctx.strokeStyle = C.line;
+  ctx.strokeStyle = skin.C.line;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.roundRect(bx, by, w, h, 8);
@@ -407,7 +244,7 @@ function drawBubble() {
   ctx.lineTo(BASE_X + 6, by + h);
   ctx.stroke();
 
-  ctx.fillStyle = C.eye;
+  ctx.fillStyle = skin.C.eye;
   ctx.textBaseline = 'middle';
   ctx.fillText(bubble.text, bx + 9, by + h / 2 + 1);
   ctx.globalAlpha = 1;
@@ -441,7 +278,7 @@ function nextAction() {
   const night = hour >= 23 || hour < 6;
   const r = Math.random();
   if (r < (night ? 0.25 : 0.04)) return startSleep();
-  if (thirsty() && r > 0.9) say(pick(['のどかわいたな…', 'おみず ほしいな…']), 2.5);
+  if (skin.care && thirsty() && r > 0.9) say(pick(['のどかわいたな…', 'おみず ほしいな…']), 2.5);
   if (s.autoWalk && r < 0.7) return startWalk();
   if (r < 0.85) return startLook();
   s.mode = 'idle';
@@ -483,18 +320,19 @@ function startSleep() {
   s.vx = 0;
   s.zT = 0.8;
   setMood('normal');
-  say('ふわぁ…おやすみ', 2);
+  say(skin.lines.sleep, 2);
 }
 
 function wakeUp() {
   zzz.length = 0;
   setMood('surprised', 0.9);
-  say('はっ！寝てないよ！', 2);
+  say(skin.lines.wake, 2);
   hop(260);
 }
 
 // 水やり（1日1回ぶんだけ育つ。同じ日にもう一度もらっても喜ぶだけ）
 function water() {
+  if (!skin.care) return;
   if (s.mode === 'sleep') zzz.length = 0;
   for (let i = 0; i < 6; i++) {
     drops.push({ x: BASE_X + rand(-18, 18) * SCALE, y: BASE_Y - headTop() - rand(20, 50) * SCALE, vy: rand(0, 60) });
@@ -521,7 +359,14 @@ function water() {
     grew = ['', 'のびた！', 'つぼみができた！', 'はながさいた！'][plantStage()];
   }
   savePet();
-  if (grew) setTimeout(() => { say(grew, 3); setMood('happy', 1.5); if (onGround()) hop(); }, 2200);
+  if (grew) {
+    setTimeout(() => {
+      say(grew, 3);
+      setMood('happy', 1.5);
+      if (onGround()) hop();
+      updateTrayIcon();   // トレイのアイコンも育った姿に
+    }, 2200);
+  }
 }
 
 function hop(power = 380) {
@@ -536,13 +381,13 @@ function onPoke() {
   if (!onGround()) return;
   cry('happy');
   setMood('happy', 1.2);
-  say(pick(LINES_POKE));
+  say(pick(skin.lines.poke));
   hop();
 }
 
 function footstep() {
   // 後ろ足の位置から、進行方向と逆に砂ぼこりを出す
-  const fx = s.x + BASE_X - s.facing * 10 * SCALE;
+  const fx = s.x + BASE_X - s.facing * skin.dustX * SCALE;
   const fy = s.y + BASE_Y - 2;
   for (let i = 0; i < 2; i++) {
     dust.push({ x: fx + rand(-2, 2), y: fy, vx: -s.facing * rand(8, 26), vy: rand(-22, -8), life: 0.45, max: 0.45 });
@@ -568,7 +413,7 @@ function land() {
   if (impact > 400) dustBurst(impact > 1000 ? 8 : 4);
   if (impact > 1300) {
     setMood('surprised', 1);
-    say(pick(['いたた…', 'びっくりした！', '目がまわる〜']), 1.8);
+    say(pick(skin.lines.hurt), 1.8);
   } else if (s.mood === 'surprised' && s.moodT === 0) {
     setMood('normal');
   }
@@ -754,7 +599,7 @@ canvas.addEventListener('pointermove', (e) => {
     s.mode = 'drag';
     s.vx = s.vy = 0;
     setMood('surprised');
-    say('わわっ', 1.2);
+    say(skin.lines.grab, 1.2);
     canvas.style.cursor = 'grabbing';
   }
   const now = performance.now();
@@ -824,13 +669,19 @@ api.onCommand((c) => {
       s.vx = 0;
       s.vy = 0;
       s.mode = 'fall';
-      say('よばれた！', 2);
+      say(skin.lines.summon, 2);
       break;
     case 'size':
       SCALE = sizeToScale(c.value);
       break;
     case 'sound':
       soundOn = c.value;
+      break;
+    case 'skin':
+      setSkin(c.value);
+      say(skin.lines.hello, 2.5);
+      setMood('happy', 1.2);
+      if (onGround()) hop(300);
       break;
     case 'water':
       water();
@@ -841,16 +692,23 @@ api.onCommand((c) => {
   }
 });
 
+function setSkin(id) {
+  skin = SKINS[id] || SKINS.hakomaru;
+  document.title = skin.name;
+  updateTrayIcon();
+}
+
 function greeting() {
+  const L = skin.lines;
   // しばらく会っていなかったとき
   const away = pet.lastSeen ? Date.now() - pet.lastSeen : 0;
-  if (away >= 3 * 86400000) return 'あいたかったよ〜！';
-  if (away >= 86400000) return 'ひさしぶり！';
+  if (away >= 3 * 86400000) return L.awayLong;
+  if (away >= 86400000) return L.away;
   const h = new Date().getHours();
-  if (h >= 5 && h < 11) return 'おはよう！';
-  if (h >= 11 && h < 18) return 'こんにちは！';
-  if (h >= 18 && h < 23) return 'こんばんは！';
-  return '夜ふかしはほどほどにね';
+  if (h >= 5 && h < 11) return L.morning;
+  if (h >= 11 && h < 18) return L.day;
+  if (h >= 18 && h < 23) return L.evening;
+  return L.night;
 }
 
 let lastHour = new Date().getHours();
@@ -859,7 +717,7 @@ function hourlyCheck() {
   if (h === lastHour) return;
   lastHour = h;
   if (onGround() && s.mode !== 'sleep') {
-    say(`${h}時になったよ！`, 3);
+    say(skin.lines.hourly(h), 3);
     setMood('happy', 1);
     hop(300);
   }
@@ -888,6 +746,7 @@ function frame(now) {
   SCALE = sizeToScale(await api.getSize());
   soundOn = await api.getSound();
   Object.assign(pet, await api.getPet());
+  setSkin(await api.getSkin());
   const hello = greeting();   // lastSeen を上書きする前に決める
   savePet();
   setInterval(savePet, 60000); // 最後に起動していた時刻を残す

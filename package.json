@@ -21,6 +21,7 @@
       "preload.js",
       "renderer.js",
       "index.html",
+      "skins/**",
       "assets/**"
     ],
     "win": {
