@@ -28,13 +28,23 @@ npm start
 - 歩く速さ：`WALK_SPEED`（歩行コマの速さは自動で追従します）
 - キャラの形：`drawCharacter()`（1ドット＝4px のドット絵座標で描いています）
 
-## 配布用にビルドする場合
-
-`electron-builder` などでパッケージ化できます。
+## 配布用にビルドする
 
 ```bash
-npm install --save-dev electron-builder
-npx electron-builder
+npm run dist
+```
+
+`dist/Hakomaru-Setup-<バージョン>.exe` ができます。これ1つを配ればOKです。
+
+- ダブルクリックするとすぐにインストールされ、スタートメニューとデスクトップにショートカットができます（管理者権限は不要）
+- アンインストールは Windows の「設定 → アプリ」から
+- コード署名をしていないので、初回は SmartScreen の「Windows によって PC が保護されました」が出ます。「詳細情報 → 実行」で起動できます
+- 配る前に `package.json` の `version` を上げておくと、上書きインストールで更新できます
+
+アイコン（`build/icon.png`）は `drawCharacter()` から作っています。見た目を変えたら作り直してください。
+
+```bash
+npm run icon
 ```
 
 ## 注意
