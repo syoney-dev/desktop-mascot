@@ -1,10 +1,10 @@
-# v* のタグを push すると、Windows 用インストーラーをビルドしてリリースに載せる。
-# リリースの説明文は、タグ（git tag -a）のメッセージがそのまま使われる。
+# Windows 用インストーラーをビルドして、GitHub のリリースに載せる。
+# Actions の「release」→「Run workflow」で実行すると、package.json の version で
+# v<version> のタグとリリースを作る。説明文は .github/release-notes/v<version>.md。
 name: release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,8 +14,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: タグのメッセージを取ってくる
-        run: git fetch --force origin "refs/tags/${{ github.ref_name }}:refs/tags/${{ github.ref_name }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -27,5 +25,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "${{ github.ref_name }}" dist/Hakomaru-Setup-*.exe \
-            --title "ハコまる ${{ github.ref_name }}" --notes-from-tag
+          tag="v$(node -p "require('./package.json').version")"
+          gh release create "$tag" dist/Hakomaru-Setup-*.exe \
+            --target "$GITHUB_SHA" --title "ハコまる $tag" \
+            --notes-file ".github/release-notes/$tag.md"

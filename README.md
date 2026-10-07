@@ -97,9 +97,8 @@ Linux ではクリック透過の転送に対応していないため、ウィ�
 
 ### リリースを出す
 
-`package.json` の `version` を上げてコミットし、同じバージョンのタグを説明文つきで push すると、GitHub Actions（`.github/workflows/release.yml`）が Windows でインストーラーをビルドしてリリースに載せます。タグのメッセージがリリースの説明文になります。
+1. `package.json` の `version` を上げる（`npm version 1.2.0 --no-git-tag-version`）
+2. 説明文を `.github/release-notes/v<バージョン>.md` に書いてコミット・push
+3. GitHub の Actions →「release」→「Run workflow」
 
-```bash
-git tag -a v1.1.0 -F リリースノート.md
-git push origin v1.1.0
-```
+Windows でインストーラーがビルドされ、`v<バージョン>` のタグとリリースが作られます。
