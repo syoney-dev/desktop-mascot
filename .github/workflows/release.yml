@@ -19,7 +19,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run dist
+      - run: npm run dist -- --publish never  # 載せるのは下の gh で行う
       - name: リリースを作ってインストーラーを載せる
         env:
           GH_TOKEN: ${{ github.token }}
