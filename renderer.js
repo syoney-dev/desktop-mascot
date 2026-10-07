@@ -304,7 +304,7 @@ function idea() {
   s.timer = 6;          // 言い終わるまでその場で立ち止まる
   s.look = 0;
   s.squash = 0.85;      // ぴくっとする
-  setMood('happy', 2);
+  setMood('surprised', 6); // はっ！とした顔のまま言い終わる
   say(`${head}\n${a} × ${b}\n${tail}`, 6, 1);
 }
 
