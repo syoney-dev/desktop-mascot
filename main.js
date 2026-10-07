@@ -4,8 +4,8 @@ const path = require('path');
 const fs = require('fs');
 
 // ウィンドウサイズ（renderer.js の W / H と合わせる）
-const W = 200;
-const H = 180;
+const W = 220;
+const H = 250;
 
 let win = null;
 let tray = null;

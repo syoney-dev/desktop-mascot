@@ -3,7 +3,7 @@
 // =====================================================
 //  設定
 // =====================================================
-const W = 200, H = 180;       // ウィンドウサイズ（main.js と合わせる）
+const W = 220, H = 250;       // ウィンドウサイズ（main.js と合わせる）。上はふきだし用のすきま
 const PX = 4;                 // ドット絵の1ドット = 4px（SCALE=1 のとき）
 const BASE_X = W / 2;         // キャラの足元（ウィンドウ内の座標）
 const BASE_Y = H - 8;
@@ -16,6 +16,18 @@ const WATER_COLOR = '#6EC6FF'; // 水やりのしずく
 const GROW_DAYS = [0, 3, 6, 10];
 const SEED_DAYS = 13;         // 花が咲いてからさらに水やりすると種になり、芽に戻る
 const THIRSTY_DAYS = 2;       // この日数水をもらわないと、しおれる（枯れはしない）
+
+// ひらめき：ときどき2つのワードを組み合わせて「○○ × ○○ どうかな？」と提案する
+const IDEA_INTERVAL = [240, 600]; // 次にひらめくまでの秒数（この範囲でランダム）
+const IDEA_WORDS = [
+  'ねこ', 'カレー', 'ロボット', 'うちゅう', 'おにぎり', '忍者', 'カフェ', '図書館',
+  'サウナ', 'きのこ', '恐竜', 'パジャマ', '温泉', 'たこやき', 'ピアノ', '探偵',
+  'スケボー', 'おばけ', '観覧車', 'ペンギン', 'ラーメン', '魔法', '盆栽', '深海',
+  '遊園地', 'プリン', 'まくら', '時計', '雪だるま', 'ドーナツ', '傘', '手紙',
+  '宝箱', 'ハムスター', '花火', 'パン屋', '天気予報', '筋トレ', '昼寝', '迷路',
+  '電車', 'お弁当', 'UFO', '占い', 'ゲーム', '料理', '相撲', '森',
+  'アイドル', 'ゾンビ', 'カエル', 'お祭り', '写真', '植物', 'タイムマシン', 'ハチミツ',
+];
 
 // =====================================================
 //  セットアップ
@@ -50,6 +62,7 @@ const sent = { x: NaN, y: NaN };
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+let ideaT = rand(...IDEA_INTERVAL);  // 次のひらめきまで (秒)
 // 大きさ 1〜10 → 倍率（10=標準、1=半分）
 const sizeToScale = (size) => 0.5 + (clamp(size, 1, 10) - 1) / 18;
 
@@ -215,15 +228,22 @@ function drawZzz() {
   ctx.globalAlpha = 1;
 }
 
+// ふきだし。'\n' で複数行。bold に行番号を入れるとその行を太字にする
 function drawBubble() {
   if (!bubble) return;
   const a = Math.min(1, bubble.life / 0.15, (bubble.max - bubble.life) / 0.3);
   ctx.globalAlpha = clamp(a, 0, 1);
-  ctx.font = '13px "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif';
-  const tw = ctx.measureText(bubble.text).width;
-  const w = Math.ceil(tw + 18), h = 26;
+  const lines = bubble.text.split('\n');
+  const LH = 17;
+  const font = (i) => `${i === bubble.bold ? 'bold ' : ''}13px "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif`;
+  let tw = 0;
+  lines.forEach((line, i) => {
+    ctx.font = font(i);
+    tw = Math.max(tw, ctx.measureText(line).width);
+  });
+  const w = Math.ceil(tw + 18), h = 9 + LH * lines.length;
   const bx = Math.round(clamp(BASE_X - w / 2, 3, W - 3 - w));
-  const by = Math.round(BASE_Y - headTop() - h - 10);
+  const by = Math.max(3, Math.round(BASE_Y - headTop() - h - 10));
 
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = skin.C.line;
@@ -246,7 +266,12 @@ function drawBubble() {
 
   ctx.fillStyle = skin.C.eye;
   ctx.textBaseline = 'middle';
-  ctx.fillText(bubble.text, bx + 9, by + h / 2 + 1);
+  ctx.textAlign = 'center';
+  lines.forEach((line, i) => {
+    ctx.font = font(i);
+    ctx.fillText(line, bx + w / 2, by + 5 + LH * (i + 0.5) + 1);
+  });
+  ctx.textAlign = 'left';
   ctx.globalAlpha = 1;
 }
 
@@ -264,8 +289,23 @@ function render() {
 // =====================================================
 //  行動
 // =====================================================
-function say(text, dur = 2.5) {
-  bubble = { text, life: 0, max: dur };
+function say(text, dur = 2.5, bold = -1) {
+  bubble = { text, life: 0, max: dur, bold };
+}
+
+// ひらめき：ワードを2つ選んで組み合わせを提案する
+function idea() {
+  const a = pick(IDEA_WORDS);
+  let b = pick(IDEA_WORDS);
+  while (b === a) b = pick(IDEA_WORDS);
+  const [head, tail] = skin.lines.idea;
+  if (s.mode === 'walk' || s.mode === 'turn') { s.vx = 0; s.walkPhase = 0; }
+  s.mode = 'idle';
+  s.timer = 6;          // 言い終わるまでその場で立ち止まる
+  s.look = 0;
+  s.squash = 0.85;      // ぴくっとする
+  setMood('happy', 2);
+  say(`${head}\n${a} × ${b}\n${tail}`, 6, 1);
 }
 
 function setMood(mood, dur = 0) {
@@ -538,6 +578,14 @@ function update(dt) {
   for (let i = zzz.length - 1; i >= 0; i--) {
     zzz[i].life += dt;
     if (zzz[i].life > 2.4 || s.mode !== 'sleep') zzz.splice(i, 1);
+  }
+  // ひらめき（立っていて、ほかにしゃべっていないときだけ）
+  if (onGround() && s.mode !== 'sleep') {
+    ideaT -= dt;
+    if (ideaT <= 0) {
+      if (bubble) ideaT = 5;   // しゃべり終わるまで待つ
+      else { idea(); ideaT = rand(...IDEA_INTERVAL); }
+    }
   }
   // ふきだし
   if (bubble) {
