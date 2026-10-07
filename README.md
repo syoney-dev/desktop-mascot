@@ -94,3 +94,12 @@ npm run icon
 ## 注意
 
 Linux ではクリック透過の転送に対応していないため、ウィンドウ全体（200×180px）がクリックを受け取ります。
+
+### リリースを出す
+
+`package.json` の `version` を上げてコミットし、同じバージョンのタグを説明文つきで push すると、GitHub Actions（`.github/workflows/release.yml`）が Windows でインストーラーをビルドしてリリースに載せます。タグのメッセージがリリースの説明文になります。
+
+```bash
+git tag -a v1.1.0 -F リリースノート.md
+git push origin v1.1.0
+```
